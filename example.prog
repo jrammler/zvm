@@ -1,0 +1,10 @@
+var a = 123 + 1 + 2
+var b = 456
+print(a * (b + 17))
+    
+  print(b + a)
+  
+
+
+
+

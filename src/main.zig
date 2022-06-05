@@ -7,12 +7,13 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
+    const filename = "example.prog";
     const cwd = std.fs.cwd();
-    const programFile = try cwd.openFile("example.prog", .{});
+    const programFile = try cwd.openFile(filename, .{});
     const programText = try programFile.reader().readAllAlloc(allocator, 1 << 30);
     programFile.close();
 
-    var ast = (try parser.Ast.parse(allocator, programText)) orelse {
+    var ast = (try parser.Ast.parse(allocator, filename, programText)) orelse {
         std.debug.print("Ast.parse did return null\n", .{});
         return;
     };

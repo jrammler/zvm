@@ -133,7 +133,7 @@ test "compilation" {
 
     var program = "var a = 17 \n var b = 2 \n expect69(a * b + 35)";
 
-    var ast = if (try Ast.parse(allocator, program)) |ast| ast else return error.ParseError;
+    var ast = if (try Ast.parse(allocator, "testfile", program)) |ast| ast else return error.ParseError;
     defer ast.deinit();
 
     const syscallList = [_][]const u8{"expect69"};

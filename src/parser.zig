@@ -309,8 +309,8 @@ pub const Ast = struct {
     statements: []Statement,
     allocator: Allocator,
 
-    pub fn parse(allocator: Allocator, text: []const u8) !?Ast {
-        var lexer = Lexer.init(text);
+    pub fn parse(allocator: Allocator, filename: []const u8, text: []const u8) !?Ast {
+        var lexer = Lexer.init(filename, text);
         _ = lexer.next();
         var statements = std.ArrayList(Statement).init(allocator);
         defer statements.deinit();
@@ -370,7 +370,7 @@ test "parseProgram" {
         \\print(sqrt(i1 + 2) * i2)
     ;
 
-    var ast = try Ast.parse(allocator, program);
+    var ast = try Ast.parse(allocator, "testfile", program);
     try expect(ast != null);
     defer ast.?.deinit();
     try expectEqual(@as(usize, 5), ast.?.statements.len);

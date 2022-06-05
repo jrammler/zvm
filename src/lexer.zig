@@ -1,6 +1,25 @@
 const std = @import("std");
 const ascii = std.ascii;
 
+pub const Location = struct {
+    filename: []const u8,
+    line: usize = 1,
+    column: usize = 1,
+
+    const Self = @This();
+
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try std.fmt.format(writer, "{s}:{}:{}", .{ self.filename, self.line, self.column });
+    }
+};
+
 pub const Token = union(enum) {
     Identifier: []const u8,
     Number: i32,
@@ -18,9 +37,13 @@ pub const Token = union(enum) {
 };
 
 pub const Lexer = struct {
+    filename: []const u8,
     text: []const u8,
-    pos: usize,
-    curr: Token,
+    pos: usize = 0,
+    line: usize = 1,
+    col: usize = 1,
+    curr: Token = Token.Init,
+    loc: Location,
 
     const LexState = enum {
         Start,
@@ -29,15 +52,22 @@ pub const Lexer = struct {
         NewLine,
     };
 
-    pub fn init(text: []const u8) Lexer {
+    const Self = @This();
+
+    pub fn init(filename: []const u8, text: []const u8) Lexer {
         return .{
+            .filename = filename,
             .text = text,
-            .pos = 0,
-            .curr = Token.Init,
+            .loc = .{ .filename = filename },
         };
     }
 
-    pub fn next(self: *Lexer) Token {
+    fn setLocation(self: *Self) void {
+        self.loc.line = self.line;
+        self.loc.column = self.col;
+    }
+
+    pub fn next(self: *Self) Token {
         var state = LexState.Start;
         var startPos: usize = undefined;
         var curPos = self.pos;
@@ -49,42 +79,55 @@ pub const Lexer = struct {
                     if (ascii.isAlpha(c)) {
                         state = .Identifier;
                         startPos = curPos;
+                        self.setLocation();
                     } else if (ascii.isDigit(c)) {
                         state = .Number;
                         startPos = curPos;
+                        self.setLocation();
                     } else if (c == '=') {
                         self.pos = curPos + 1;
                         self.curr = .Equals;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == '(') {
                         self.pos = curPos + 1;
                         self.curr = .ParenOpen;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == ')') {
                         self.pos = curPos + 1;
                         self.curr = .ParenClose;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == ',') {
                         self.pos = curPos + 1;
                         self.curr = .Comma;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == '+') {
                         self.pos = curPos + 1;
                         self.curr = .Plus;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == '*') {
                         self.pos = curPos + 1;
                         self.curr = .Star;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == ascii.control_code.EOT) {
                         self.pos = curPos;
                         self.curr = .EoF;
+                        self.setLocation();
                         return self.curr;
                     } else if (c == ascii.control_code.LF) {
                         state = .NewLine;
+                        self.line += 1;
+                        self.col = 0;
                         startPos = curPos;
+                        self.setLocation();
                     } else if (!ascii.isBlank(c)) {
                         self.curr = .LexError;
+                        self.setLocation();
                         return self.curr;
                     }
                 },
@@ -113,14 +156,18 @@ pub const Lexer = struct {
                         self.pos = curPos;
                         self.curr = .NewLine;
                         return self.curr;
+                    } else if (c == ascii.control_code.LF) {
+                        self.line += 1;
+                        self.col = 0;
                     }
                 },
             }
             curPos += 1;
+            self.col += 1;
         }
     }
 
-    pub fn isLineEnd(self: *Lexer) bool {
+    pub fn isLineEnd(self: *Self) bool {
         return self.curr == .NewLine or self.curr == .EoF;
     }
 };
@@ -129,7 +176,7 @@ test "lexer" {
     const expectEqual = std.testing.expectEqual;
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    var lexer = Lexer.init("var asdf = 123\n");
+    var lexer = Lexer.init("testfile", "var asdf = 123\n");
 
     try expectEqual(Token.KeywordVar, lexer.next());
     try expectEqualSlices(u8, "asdf", lexer.next().Identifier);

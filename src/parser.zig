@@ -2,31 +2,42 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Lexer = @import("lexer.zig").Lexer;
 const Token = @import("lexer.zig").Token;
+const TokenType = @import("lexer.zig").TokenType;
+
+pub const Error = Allocator.Error || error{ParseError};
+
+fn expectToken(lexer: *Lexer, tokenType: TokenType) !Token {
+    if (@as(TokenType, lexer.curr) == tokenType) {
+        var old = lexer.curr;
+        _ = lexer.next();
+        return old;
+    }
+    std.debug.print("{s}: Expected token {s} but got {s}\n", .{ lexer.loc, tokenType, lexer.curr });
+    return error.ParseError;
+}
+
+fn expectLineEnd(lexer: *Lexer) !void {
+    if (lexer.isLineEnd()) {
+        _ = lexer.next();
+        return;
+    }
+    std.debug.print("{s}: Expected end of line but got {s}\n", .{ lexer.loc, lexer.curr });
+    return error.ParseError;
+}
 
 pub const Declaration = struct {
     identifier: []const u8,
     value: Expression,
 
-    fn parse(allocator: Allocator, lexer: *Lexer) !?Declaration {
-        if (lexer.curr != Token.KeywordVar) {
-            return null;
-        }
-        var nameToken = lexer.next();
-        if (nameToken != Token.Identifier) {
-            return null;
-        }
-        if (lexer.next() != Token.Equals) {
-            return null;
-        }
-        _ = lexer.next();
+    fn parse(allocator: Allocator, lexer: *Lexer) !Declaration {
+        _ = try expectToken(lexer, Token.KeywordVar);
+        var nameToken = try expectToken(lexer, TokenType.Identifier);
+        _ = try expectToken(lexer, Token.Equals);
         var initExpr = try Expression.parse(allocator, lexer);
-        if (initExpr == null) {
-            return null;
-        }
 
         return Declaration{
             .identifier = nameToken.Identifier,
-            .value = initExpr.?,
+            .value = initExpr,
         };
     }
 
@@ -50,15 +61,15 @@ const ArgumentList = struct {
     arguments: []Expression,
     allocator: Allocator,
 
-    fn parse(allocator: Allocator, lexer: *Lexer) !?ArgumentList {
+    fn parse(allocator: Allocator, lexer: *Lexer) !ArgumentList {
         var arguments = std.ArrayList(Expression).init(allocator);
         defer arguments.deinit();
-        while (try Expression.parse(allocator, lexer)) |expr| {
+        while (lexer.curr != Token.ParenClose) {
+            var expr = try Expression.parse(allocator, lexer);
+            errdefer expr.deinit();
+
             try arguments.append(expr);
-            if (lexer.curr != Token.Comma) {
-                break;
-            }
-            _ = lexer.next();
+            if (lexer.curr != TokenType.Comma) break;
         }
 
         return ArgumentList{
@@ -107,7 +118,7 @@ pub const Expression = union(enum) {
         allocator: Allocator,
     },
 
-    fn parseFactor(allocator: Allocator, lexer: *Lexer) !?Expression {
+    fn parseFactor(allocator: Allocator, lexer: *Lexer) !Expression {
         _ = allocator;
         switch (lexer.curr) {
             .Number => {
@@ -115,18 +126,14 @@ pub const Expression = union(enum) {
                 return Expression{ .Number = lexer.curr.Number };
             },
             .Identifier => {
-                var nameToken = lexer.curr;
-                _ = lexer.next();
+                var nameToken = try expectToken(lexer, TokenType.Identifier);
                 if (lexer.curr != Token.ParenOpen) {
                     return Expression{ .Variable = nameToken.Identifier };
                 }
                 _ = lexer.next();
-                var argList = if (try ArgumentList.parse(allocator, lexer)) |argList| argList else return null;
-                if (lexer.curr != Token.ParenClose) {
-                    argList.deinit();
-                    return null;
-                }
-                _ = lexer.next();
+                var argList = try ArgumentList.parse(allocator, lexer);
+                errdefer argList.deinit();
+                _ = try expectToken(lexer, TokenType.ParenClose);
                 return Expression{ .FunctionCall = .{
                     .name = nameToken.Identifier,
                     .argList = argList,
@@ -134,34 +141,31 @@ pub const Expression = union(enum) {
             },
             .ParenOpen => {
                 _ = lexer.next();
-                var expr = if (try Expression.parse(allocator, lexer)) |expr| expr else return null;
-                if (lexer.curr != Token.ParenClose) {
-                    expr.deinit();
-                    return null;
-                }
-                _ = lexer.next();
+                var expr = try Expression.parse(allocator, lexer);
+                errdefer expr.deinit();
+                _ = try expectToken(lexer, TokenType.ParenClose);
                 return expr;
             },
             else => {
-                return null;
+                std.debug.print("{s}: Unexpected token {s}\n", .{ lexer.loc, lexer.curr });
+                return error.ParseError;
             },
         }
     }
 
-    fn parseTerm(allocator: Allocator, lexer: *Lexer) !?Expression {
-        var factor1 = if (try parseFactor(allocator, lexer)) |factor| factor else return null;
+    fn parseTerm(allocator: Allocator, lexer: *Lexer) !Expression {
+        var factor1 = try parseFactor(allocator, lexer);
+        errdefer factor1.deinit();
 
         while (lexer.curr == Token.Star) {
             _ = lexer.next();
             var factor2 = try parseFactor(allocator, lexer);
-            if (factor2 == null) {
-                factor1.deinit();
-                return null;
-            }
+            errdefer factor2.deinit();
             var f1 = try allocator.create(Expression);
+            errdefer allocator.destroy(f1);
             f1.* = factor1;
             var f2 = try allocator.create(Expression);
-            f2.* = factor2.?;
+            f2.* = factor2;
             factor1 = Expression{
                 .Product = .{
                     .factor1 = f1,
@@ -174,20 +178,19 @@ pub const Expression = union(enum) {
         return factor1;
     }
 
-    fn parse(allocator: Allocator, lexer: *Lexer) Allocator.Error!?Expression {
-        var term1 = if (try parseTerm(allocator, lexer)) |term| term else return null;
+    fn parse(allocator: Allocator, lexer: *Lexer) Error!Expression {
+        var term1 = try parseTerm(allocator, lexer);
+        errdefer term1.deinit();
 
         while (lexer.curr == Token.Plus) {
             _ = lexer.next();
             var term2 = try parseTerm(allocator, lexer);
-            if (term2 == null) {
-                term1.deinit();
-                return null;
-            }
+            errdefer term2.deinit();
             var s1 = try allocator.create(Expression);
+            errdefer allocator.destroy(s1);
             s1.* = term1;
             var s2 = try allocator.create(Expression);
-            s2.* = term2.?;
+            s2.* = term2;
             term1 = Expression{
                 .Sum = .{
                     .summand1 = s1,
@@ -258,20 +261,17 @@ pub const Statement = union(enum) {
     Declaration: Declaration,
     Expression: Expression,
 
-    fn parse(allocator: Allocator, lexer: *Lexer) !?Statement {
+    fn parse(allocator: Allocator, lexer: *Lexer) !Statement {
         var statement: Statement = undefined;
-        if (try Declaration.parse(allocator, lexer)) |declaration| {
+        if (lexer.curr == Token.KeywordVar) {
+            var declaration = try Declaration.parse(allocator, lexer);
             statement = Statement{ .Declaration = declaration };
-        } else if (try Expression.parse(allocator, lexer)) |expression| {
-            statement = Statement{ .Expression = expression };
         } else {
-            return null;
+            var expression = try Expression.parse(allocator, lexer);
+            statement = Statement{ .Expression = expression };
         }
-        if (!lexer.isLineEnd()) {
-            statement.deinit();
-            return null;
-        }
-        _ = lexer.next();
+        errdefer statement.deinit();
+        try expectLineEnd(lexer);
         return statement;
     }
 
@@ -309,23 +309,15 @@ pub const Ast = struct {
     statements: []Statement,
     allocator: Allocator,
 
-    pub fn parse(allocator: Allocator, filename: []const u8, text: []const u8) !?Ast {
+    pub fn parse(allocator: Allocator, filename: []const u8, text: []const u8) !Ast {
         var lexer = Lexer.init(filename, text);
         _ = lexer.next();
         var statements = std.ArrayList(Statement).init(allocator);
         defer statements.deinit();
 
-        while (try Statement.parse(allocator, &lexer)) |statement| {
+        while (lexer.curr != Token.EoF) {
+            var statement = try Statement.parse(allocator, &lexer);
             try statements.append(statement);
-        }
-        if (lexer.curr == Token.NewLine) {
-            _ = lexer.next();
-        }
-        if (lexer.curr != Token.EoF) {
-            for (statements.items) |*statement| {
-                statement.deinit();
-            }
-            return null;
         }
 
         return Ast{
@@ -358,7 +350,6 @@ pub const Ast = struct {
 
 test "parseProgram" {
     const expectEqual = std.testing.expectEqual;
-    const expect = std.testing.expect;
 
     const allocator = std.testing.allocator;
 
@@ -371,7 +362,6 @@ test "parseProgram" {
     ;
 
     var ast = try Ast.parse(allocator, "testfile", program);
-    try expect(ast != null);
-    defer ast.?.deinit();
-    try expectEqual(@as(usize, 5), ast.?.statements.len);
+    defer ast.deinit();
+    try expectEqual(@as(usize, 5), ast.statements.len);
 }

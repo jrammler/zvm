@@ -36,6 +36,8 @@ pub const Token = union(enum) {
     LexError,
 };
 
+pub const TokenType = @typeInfo(Token).Union.tag_type.?;
+
 pub const Lexer = struct {
     filename: []const u8,
     text: []const u8,
@@ -88,31 +90,37 @@ pub const Lexer = struct {
                         self.pos = curPos + 1;
                         self.curr = .Equals;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == '(') {
                         self.pos = curPos + 1;
                         self.curr = .ParenOpen;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == ')') {
                         self.pos = curPos + 1;
                         self.curr = .ParenClose;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == ',') {
                         self.pos = curPos + 1;
                         self.curr = .Comma;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == '+') {
                         self.pos = curPos + 1;
                         self.curr = .Plus;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == '*') {
                         self.pos = curPos + 1;
                         self.curr = .Star;
                         self.setLocation();
+                        self.col += 1;
                         return self.curr;
                     } else if (c == ascii.control_code.EOT) {
                         self.pos = curPos;

@@ -13,8 +13,8 @@ pub fn main() !void {
     const programText = try programFile.reader().readAllAlloc(allocator, 1 << 30);
     programFile.close();
 
-    var ast = (try parser.Ast.parse(allocator, filename, programText)) orelse {
-        std.debug.print("Ast.parse did return null\n", .{});
+    var ast = parser.Ast.parse(allocator, filename, programText) catch {
+        std.debug.print("Error during parsing\n", .{});
         return;
     };
     defer ast.deinit();

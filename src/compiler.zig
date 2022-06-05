@@ -7,10 +7,7 @@ const Expression = @import("parser.zig").Expression;
 const Declaration = @import("parser.zig").Declaration;
 const vm = @import("vm.zig");
 
-const Error = error{
-    OutOfMemory,
-    CompilationError,
-};
+const Error = Allocator.Error || error{CompilationError};
 
 const MemoryFrame = struct {
     variables: std.ArrayList([]const u8),
@@ -133,7 +130,7 @@ test "compilation" {
 
     var program = "var a = 17 \n var b = 2 \n expect69(a * b + 35)";
 
-    var ast = if (try Ast.parse(allocator, "testfile", program)) |ast| ast else return error.ParseError;
+    var ast = try Ast.parse(allocator, "testfile", program);
     defer ast.deinit();
 
     const syscallList = [_][]const u8{"expect69"};

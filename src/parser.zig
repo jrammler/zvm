@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Lexer = @import("lexer.zig").Lexer;
 const Token = @import("lexer.zig").Token;
 
-const Declaration = struct {
+pub const Declaration = struct {
     identifier: []const u8,
     value: Expression,
 
@@ -89,7 +89,7 @@ const ArgumentList = struct {
     }
 };
 
-const Expression = union(enum) {
+pub const Expression = union(enum) {
     Number: i32,
     Variable: []const u8,
     FunctionCall: struct {
@@ -254,7 +254,7 @@ const Expression = union(enum) {
     }
 };
 
-const Statement = union(enum) {
+pub const Statement = union(enum) {
     Declaration: Declaration,
     Expression: Expression,
 

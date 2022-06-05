@@ -1,9 +1,10 @@
 const std = @import("std");
 
-const Instruction = union(enum) {
+pub const Instruction = union(enum) {
     Push: i32,
     Add,
     Sub,
+    Mul,
     Store,
     Load,
     Jump: usize,
@@ -12,56 +13,56 @@ const Instruction = union(enum) {
     Syscall: usize,
 };
 
-const Memory = struct {
+pub const Memory = struct {
     buffer: []u8,
 
-    fn init(buffer: []u8) Memory {
+    pub fn init(buffer: []u8) Memory {
         return Memory{ .buffer = buffer };
     }
 
-    fn storeInt(self: *Memory, address: usize, value: i32) void {
+    pub fn storeInt(self: *Memory, address: usize, value: i32) void {
         var v = value;
         std.mem.copy(u8, self.buffer[address .. address + 4], @ptrCast(*[4]u8, &v));
     }
 
-    fn loadInt(self: *Memory, address: usize) i32 {
+    pub fn loadInt(self: *Memory, address: usize) i32 {
         var value: i32 = undefined;
         std.mem.copy(u8, @ptrCast(*[4]u8, &value), self.buffer[address .. address + 4]);
         return value;
     }
 };
 
-const Stack = struct {
+pub const Stack = struct {
     memory: Memory,
     sp: usize,
 
-    fn init(memory: Memory) Stack {
+    pub fn init(memory: Memory) Stack {
         return Stack{
             .memory = memory,
             .sp = 0,
         };
     }
 
-    fn pushInt(self: *Stack, value: i32) void {
+    pub fn pushInt(self: *Stack, value: i32) void {
         self.memory.storeInt(self.sp, value);
         self.sp += 4;
     }
 
-    fn popInt(self: *Stack) i32 {
+    pub fn popInt(self: *Stack) i32 {
         self.sp -= 4;
         return self.memory.loadInt(self.sp);
     }
 };
 
-const Syscall = fn (stack: *Stack, memory: *Memory) void;
+pub const Syscall = fn (stack: *Stack, memory: *Memory) void;
 
-fn syscallPrint(stack: *Stack, memory: *Memory) void {
+pub fn syscallPrint(stack: *Stack, memory: *Memory) void {
     _ = memory;
     var value = stack.popInt();
     std.debug.print("{}\n", .{value});
 }
 
-fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, syscalls: []const Syscall) void {
+pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, syscalls: []const Syscall) void {
     var ip: usize = 0;
 
     while (ip < program.len) {
@@ -80,6 +81,12 @@ fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, syscal
                 var v1 = stack.popInt();
                 var v2 = stack.popInt();
                 stack.pushInt(v2 - v1);
+                ip += 1;
+            },
+            .Mul => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(v1 * v2);
                 ip += 1;
             },
             .Store => {

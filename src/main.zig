@@ -13,16 +13,16 @@ pub fn main() !void {
     const programText = try programFile.reader().readAllAlloc(allocator, 1 << 30);
     programFile.close();
 
-    var ast = parser.Ast.parse(allocator, filename, programText) catch {
+    var statements = parser.parseFile(allocator, filename, programText) catch {
         std.debug.print("Error during parsing\n", .{});
         return;
     };
-    defer ast.deinit();
+    defer statements.deinit();
 
     const syscallList = [_][]const u8{"print"};
     const syscalls = [_]vm.Syscall{vm.syscallPrint};
 
-    var instructions = compiler.compile(allocator, ast, syscallList[0..]) catch {
+    var instructions = compiler.compile(allocator, statements, syscallList[0..]) catch {
         std.log.err("Error during compilation\n", .{});
         return;
     };

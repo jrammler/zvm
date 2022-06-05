@@ -5,8 +5,12 @@ pub const Instruction = union(enum) {
     Add,
     Sub,
     Mul,
+    Div,
+    LT,
+    GT,
     Store,
     Load,
+    Pop,
     Jump: usize,
     JumpGtZero: usize,
     JumpEqZero: usize,
@@ -60,6 +64,7 @@ pub fn syscallPrint(stack: *Stack, memory: *Memory) void {
     _ = memory;
     var value = stack.popInt();
     std.debug.print("{}\n", .{value});
+    stack.pushInt(0);
 }
 
 pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, syscalls: []const Syscall) void {
@@ -80,13 +85,31 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
             .Sub => {
                 var v1 = stack.popInt();
                 var v2 = stack.popInt();
-                stack.pushInt(v2 - v1);
+                stack.pushInt(v1 - v2);
                 ip += 1;
             },
             .Mul => {
                 var v1 = stack.popInt();
                 var v2 = stack.popInt();
                 stack.pushInt(v1 * v2);
+                ip += 1;
+            },
+            .Div => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(@divTrunc(v1, v2));
+                ip += 1;
+            },
+            .LT => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(if (v1 < v2) 1 else 0);
+                ip += 1;
+            },
+            .GT => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(if (v1 > v2) 1 else 0);
                 ip += 1;
             },
             .Store => {
@@ -99,6 +122,10 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
                 var addr = stack.popInt();
                 var value = memory.loadInt(@intCast(usize, addr));
                 stack.pushInt(value);
+                ip += 1;
+            },
+            .Pop => {
+                _ = stack.popInt();
                 ip += 1;
             },
             .Jump => |jmpIp| {
@@ -152,9 +179,9 @@ test "program evaluation" {
         .Load,
         .{ .JumpEqZero = 23 }, // jump after .{ .Jump = 6 },
 
+        .{ .Push = 1 },
         .{ .Push = 0 },
         .Load,
-        .{ .Push = 1 },
         .Sub,
         .{ .Push = 0 },
         .Store,

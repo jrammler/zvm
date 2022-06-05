@@ -24,12 +24,19 @@ pub const Token = union(enum) {
     Identifier: []const u8,
     Number: i32,
     KeywordVar,
+    KeywordWhile,
     Equals,
+    LessThan,
+    GreaterThan,
     ParenOpen,
     ParenClose,
+    CurlyOpen,
+    CurlyClose,
     Comma,
     Plus,
+    Minus,
     Star,
+    Slash,
     NewLine,
     Init,
     EoF,
@@ -92,6 +99,18 @@ pub const Lexer = struct {
                         self.setLocation();
                         self.col += 1;
                         return self.curr;
+                    } else if (c == '<') {
+                        self.pos = curPos + 1;
+                        self.curr = .LessThan;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
+                    } else if (c == '>') {
+                        self.pos = curPos + 1;
+                        self.curr = .GreaterThan;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
                     } else if (c == '(') {
                         self.pos = curPos + 1;
                         self.curr = .ParenOpen;
@@ -101,6 +120,18 @@ pub const Lexer = struct {
                     } else if (c == ')') {
                         self.pos = curPos + 1;
                         self.curr = .ParenClose;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
+                    } else if (c == '{') {
+                        self.pos = curPos + 1;
+                        self.curr = .CurlyOpen;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
+                    } else if (c == '}') {
+                        self.pos = curPos + 1;
+                        self.curr = .CurlyClose;
                         self.setLocation();
                         self.col += 1;
                         return self.curr;
@@ -116,9 +147,21 @@ pub const Lexer = struct {
                         self.setLocation();
                         self.col += 1;
                         return self.curr;
+                    } else if (c == '-') {
+                        self.pos = curPos + 1;
+                        self.curr = .Minus;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
                     } else if (c == '*') {
                         self.pos = curPos + 1;
                         self.curr = .Star;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
+                    } else if (c == '/') {
+                        self.pos = curPos + 1;
+                        self.curr = .Slash;
                         self.setLocation();
                         self.col += 1;
                         return self.curr;
@@ -145,6 +188,9 @@ pub const Lexer = struct {
                         var text = self.text[startPos..curPos];
                         if (std.mem.eql(u8, "var", text)) {
                             self.curr = .KeywordVar;
+                            return self.curr;
+                        } else if (std.mem.eql(u8, "while", text)) {
+                            self.curr = .KeywordWhile;
                             return self.curr;
                         }
                         self.curr = .{ .Identifier = text };

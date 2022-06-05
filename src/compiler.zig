@@ -1,10 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Ast = @import("parser.zig").Ast;
-const Statement = @import("parser.zig").Statement;
-const Expression = @import("parser.zig").Expression;
-const Declaration = @import("parser.zig").Declaration;
+const parser = @import("parser.zig");
+const Block = parser.Block;
+const Statement = parser.Statement;
+const Expression = parser.Expression;
+const Declaration = parser.Declaration;
 const vm = @import("vm.zig");
 
 const Error = Allocator.Error || error{CompilationError};
@@ -76,15 +77,34 @@ fn compileExpression(expression: Expression, instructions: *std.ArrayList(vm.Ins
             }
             try instructions.append(.{ .Syscall = syscallNum });
         },
-        .Sum => |sum| {
-            try compileExpression(sum.summand1.*, instructions, memoryFrame, syscallList);
-            try compileExpression(sum.summand2.*, instructions, memoryFrame, syscallList);
-            try instructions.append(.Add);
-        },
-        .Product => |prod| {
-            try compileExpression(prod.factor1.*, instructions, memoryFrame, syscallList);
-            try compileExpression(prod.factor2.*, instructions, memoryFrame, syscallList);
-            try instructions.append(.Mul);
+        .BinaryOp => |op| {
+            try compileExpression(op.operand2.*, instructions, memoryFrame, syscallList);
+            if (op.operator == .Equals) {
+                if (op.operand1.* != .Variable) {
+                    std.log.err("Assignment is only possible to variable\n", .{});
+                    return error.CompilationError;
+                }
+            } else {
+                try compileExpression(op.operand1.*, instructions, memoryFrame, syscallList);
+            }
+            switch (op.operator) {
+                .Plus => try instructions.append(.Add),
+                .Minus => try instructions.append(.Sub),
+                .Star => try instructions.append(.Mul),
+                .Slash => try instructions.append(.Div),
+                .GreaterThan => try instructions.append(.GT),
+                .LessThan => try instructions.append(.LT),
+                .Equals => {
+                    var addr = memoryFrame.variableAddr(op.operand1.Variable) orelse {
+                        std.log.err("Variable \"{s}\" not found\n", .{op.operand1.Variable});
+                        return error.CompilationError;
+                    };
+                    try instructions.append(.{ .Push = addr });
+                    try instructions.append(.Store);
+                    try instructions.append(.{ .Push = 0 });
+                },
+                else => unreachable,
+            }
         },
     }
 }
@@ -97,19 +117,33 @@ fn compileStatement(statement: Statement, instructions: *std.ArrayList(vm.Instru
         },
         .Expression => |expression| {
             try compileExpression(expression, instructions, memoryFrame, syscallList);
+            try instructions.append(.Pop);
+        },
+        .WhileLoop => |loop| {
+            var beginCondAddr = instructions.items.len;
+            try compileExpression(loop.condition, instructions, memoryFrame, syscallList);
+            var jumpCondAddr = instructions.items.len;
+            try instructions.append(.{ .JumpEqZero = 0 });
+            try compileBlock(loop.body, instructions, memoryFrame, syscallList);
+            try instructions.append(.{ .Jump = beginCondAddr });
+            instructions.items[jumpCondAddr].JumpEqZero = instructions.items.len;
         },
     }
 }
 
-pub fn compile(allocator: Allocator, ast: Ast, syscallList: []const []const u8) ![]vm.Instruction {
+fn compileBlock(block: Block, instructions: *std.ArrayList(vm.Instruction), memoryFrame: *MemoryFrame, syscallList: []const []const u8) Error!void {
+    for (block.statements) |statement| {
+        try compileStatement(statement, instructions, memoryFrame, syscallList);
+    }
+}
+
+pub fn compile(allocator: Allocator, block: Block, syscallList: []const []const u8) ![]vm.Instruction {
     var instructions = std.ArrayList(vm.Instruction).init(allocator);
     defer instructions.deinit();
     var memoryFrame = MemoryFrame.init(allocator);
     defer memoryFrame.deinit();
 
-    for (ast.statements) |statement| {
-        try compileStatement(statement, &instructions, &memoryFrame, syscallList);
-    }
+    try compileBlock(block, &instructions, &memoryFrame, syscallList);
 
     return instructions.toOwnedSlice();
 }
@@ -121,6 +155,7 @@ fn syscallExpect69(stack: *vm.Stack, memory: *vm.Memory) void {
     if (value != 69) {
         testError = true;
     }
+    stack.pushInt(0);
 }
 
 test "compilation" {
@@ -130,11 +165,11 @@ test "compilation" {
 
     var program = "var a = 17 \n var b = 2 \n expect69(a * b + 35)";
 
-    var ast = try Ast.parse(allocator, "testfile", program);
-    defer ast.deinit();
+    var block = try parser.parseFile(allocator, "testfile", program);
+    defer block.deinit();
 
     const syscallList = [_][]const u8{"expect69"};
-    var instructions = try compile(allocator, ast, syscallList[0..]);
+    var instructions = try compile(allocator, block, syscallList[0..]);
     defer allocator.free(instructions);
 
     var stackBuffer: [1 << 10]u8 = undefined;

@@ -12,7 +12,7 @@ fn expectToken(lexer: *Lexer, tokenType: TokenType) !Token {
         _ = lexer.next();
         return old;
     }
-    std.debug.print("{s}: Expected token {s} but got {s}\n", .{ lexer.loc, tokenType, lexer.curr });
+    std.debug.print("{s}: Expected token of type \"{s}\" but got {s}\n", .{ lexer.loc, @tagName(tokenType), lexer.curr });
     return error.ParseError;
 }
 
@@ -107,14 +107,10 @@ pub const Expression = union(enum) {
         name: []const u8,
         argList: ArgumentList,
     },
-    Sum: struct {
-        summand1: *Expression,
-        summand2: *Expression,
-        allocator: Allocator,
-    },
-    Product: struct {
-        factor1: *Expression,
-        factor2: *Expression,
+    BinaryOp: struct {
+        operand1: *Expression,
+        operand2: *Expression,
+        operator: TokenType,
         allocator: Allocator,
     },
 
@@ -153,54 +149,51 @@ pub const Expression = union(enum) {
         }
     }
 
-    fn parseTerm(allocator: Allocator, lexer: *Lexer) !Expression {
-        var factor1 = try parseFactor(allocator, lexer);
-        errdefer factor1.deinit();
-
-        while (lexer.curr == Token.Star) {
-            _ = lexer.next();
-            var factor2 = try parseFactor(allocator, lexer);
-            errdefer factor2.deinit();
-            var f1 = try allocator.create(Expression);
-            errdefer allocator.destroy(f1);
-            f1.* = factor1;
-            var f2 = try allocator.create(Expression);
-            f2.* = factor2;
-            factor1 = Expression{
-                .Product = .{
-                    .factor1 = f1,
-                    .factor2 = f2,
-                    .allocator = allocator,
-                },
-            };
+    const binaryOperators = [_][]const TokenType{
+        &.{.Equals},
+        &.{ .LessThan, .GreaterThan },
+        &.{ .Plus, .Minus },
+        &.{ .Star, .Slash },
+    };
+    fn hasPrecedence(token: Token, precedence: usize) bool {
+        for (binaryOperators[precedence]) |operator| {
+            if (operator == @as(TokenType, token)) {
+                return true;
+            }
         }
-
-        return factor1;
+        return false;
     }
 
-    fn parse(allocator: Allocator, lexer: *Lexer) Error!Expression {
-        var term1 = try parseTerm(allocator, lexer);
-        errdefer term1.deinit();
+    fn parseTerm(allocator: Allocator, lexer: *Lexer, precedence: usize) Error!Expression {
+        if (precedence >= binaryOperators.len) return parseFactor(allocator, lexer);
+        var operand1 = try parseTerm(allocator, lexer, precedence + 1);
+        errdefer operand1.deinit();
 
-        while (lexer.curr == Token.Plus) {
+        while (hasPrecedence(lexer.curr, precedence)) {
+            var operator = @as(TokenType, lexer.curr);
             _ = lexer.next();
-            var term2 = try parseTerm(allocator, lexer);
-            errdefer term2.deinit();
-            var s1 = try allocator.create(Expression);
-            errdefer allocator.destroy(s1);
-            s1.* = term1;
-            var s2 = try allocator.create(Expression);
-            s2.* = term2;
-            term1 = Expression{
-                .Sum = .{
-                    .summand1 = s1,
-                    .summand2 = s2,
+            var operand2 = try parseTerm(allocator, lexer, precedence + 1);
+            errdefer operand2.deinit();
+            var op1 = try allocator.create(Expression);
+            errdefer allocator.destroy(op1);
+            op1.* = operand1;
+            var op2 = try allocator.create(Expression);
+            op2.* = operand2;
+            operand1 = Expression{
+                .BinaryOp = .{
+                    .operand1 = op1,
+                    .operand2 = op2,
+                    .operator = operator,
                     .allocator = allocator,
                 },
             };
         }
 
-        return term1;
+        return operand1;
+    }
+
+    fn parse(allocator: Allocator, lexer: *Lexer) !Expression {
+        return parseTerm(allocator, lexer, 0);
     }
 
     fn deinit(self: *Expression) void {
@@ -210,21 +203,13 @@ pub const Expression = union(enum) {
             .FunctionCall => |*call| {
                 call.argList.deinit();
             },
-            .Sum => |*sum| {
-                sum.summand1.deinit();
-                sum.allocator.destroy(sum.summand1);
-                sum.summand1 = undefined;
-                sum.summand2.deinit();
-                sum.allocator.destroy(sum.summand2);
-                sum.summand2 = undefined;
-            },
-            .Product => |*prod| {
-                prod.factor1.deinit();
-                prod.allocator.destroy(prod.factor1);
-                prod.factor1 = undefined;
-                prod.factor2.deinit();
-                prod.allocator.destroy(prod.factor2);
-                prod.factor2 = undefined;
+            .BinaryOp => |*op| {
+                op.operand1.deinit();
+                op.allocator.destroy(op.operand1);
+                op.operand1 = undefined;
+                op.operand2.deinit();
+                op.allocator.destroy(op.operand2);
+                op.operand2 = undefined;
             },
         }
     }
@@ -247,25 +232,56 @@ pub const Expression = union(enum) {
             .FunctionCall => |call| {
                 return std.fmt.format(writer, "call {s}({s})", .{ call.name, call.argList });
             },
-            .Sum => |s| {
-                return std.fmt.format(writer, "({s} + {s})", .{ s.summand1, s.summand2 });
-            },
-            .Product => |p| {
-                return std.fmt.format(writer, "({s} * {s})", .{ p.factor1, p.factor2 });
+            .BinaryOp => |op| {
+                return std.fmt.format(writer, "({s} {s} {s})", .{ op.operand1, @tagName(op.operator), op.operand2 });
             },
         }
+    }
+};
+
+pub const WhileLoop = struct {
+    condition: Expression,
+    body: Block,
+    allocator: Allocator,
+
+    const Self = @This();
+
+    fn parse(allocator: Allocator, lexer: *Lexer) !Self {
+        _ = try expectToken(lexer, .KeywordWhile);
+        var condition = try Expression.parse(allocator, lexer);
+        errdefer condition.deinit();
+        _ = try expectToken(lexer, .CurlyOpen);
+        _ = try expectToken(lexer, .NewLine);
+        var body = try Block.parse(allocator, lexer);
+        errdefer body.deinit();
+        _ = try expectToken(lexer, .CurlyClose);
+        return Self{
+            .condition = condition,
+            .body = body,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.condition.deinit();
+        self.body.deinit();
+        self.body = undefined;
     }
 };
 
 pub const Statement = union(enum) {
     Declaration: Declaration,
     Expression: Expression,
+    WhileLoop: WhileLoop,
 
-    fn parse(allocator: Allocator, lexer: *Lexer) !Statement {
+    fn parse(allocator: Allocator, lexer: *Lexer) Error!Statement {
         var statement: Statement = undefined;
         if (lexer.curr == Token.KeywordVar) {
             var declaration = try Declaration.parse(allocator, lexer);
             statement = Statement{ .Declaration = declaration };
+        } else if (lexer.curr == Token.KeywordWhile) {
+            var loop = try WhileLoop.parse(allocator, lexer);
+            statement = Statement{ .WhileLoop = loop };
         } else {
             var expression = try Expression.parse(allocator, lexer);
             statement = Statement{ .Expression = expression };
@@ -282,6 +298,9 @@ pub const Statement = union(enum) {
             },
             .Expression => |*expr| {
                 expr.deinit();
+            },
+            .WhileLoop => |*loop| {
+                loop.deinit();
             },
         }
     }
@@ -305,28 +324,28 @@ pub const Statement = union(enum) {
     }
 };
 
-pub const Ast = struct {
+pub const Block = struct {
     statements: []Statement,
     allocator: Allocator,
 
-    pub fn parse(allocator: Allocator, filename: []const u8, text: []const u8) !Ast {
-        var lexer = Lexer.init(filename, text);
-        _ = lexer.next();
+    const Self = @This();
+
+    fn parse(allocator: Allocator, lexer: *Lexer) !Self {
         var statements = std.ArrayList(Statement).init(allocator);
         defer statements.deinit();
 
-        while (lexer.curr != Token.EoF) {
-            var statement = try Statement.parse(allocator, &lexer);
+        while (lexer.curr != Token.EoF and lexer.curr != Token.CurlyClose) {
+            var statement = try Statement.parse(allocator, lexer);
             try statements.append(statement);
         }
 
-        return Ast{
+        return Self{
             .statements = statements.toOwnedSlice(),
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *Ast) void {
+    pub fn deinit(self: *Self) void {
         for (self.statements) |*statement| {
             statement.deinit();
         }
@@ -335,7 +354,7 @@ pub const Ast = struct {
     }
 
     pub fn format(
-        self: Ast,
+        self: Self,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
@@ -347,6 +366,14 @@ pub const Ast = struct {
         }
     }
 };
+
+pub fn parseFile(allocator: Allocator, filename: []const u8, text: []const u8) !Block {
+    var lexer = Lexer.init(filename, text);
+    _ = lexer.next();
+    var block = Block.parse(allocator, &lexer);
+    _ = try expectToken(&lexer, .EoF);
+    return block;
+}
 
 test "parseProgram" {
     const expectEqual = std.testing.expectEqual;
@@ -361,7 +388,7 @@ test "parseProgram" {
         \\print(sqrt(i1 + 2) * i2)
     ;
 
-    var ast = try Ast.parse(allocator, "testfile", program);
-    defer ast.deinit();
-    try expectEqual(@as(usize, 5), ast.statements.len);
+    var block = try parseFile(allocator, "testfile", program);
+    defer block.deinit();
+    try expectEqual(@as(usize, 5), block.statements.len);
 }

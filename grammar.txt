@@ -1,6 +1,0 @@
-statement     = ( expression | declaration ) "\n"
-expression    = expression "+" term | term
-term          = term "*" factor | factor
-factor        = identifier [ "(" argument_list ")" ] | number | "(" expression ")"
-argument_list = [ argument_list "," expression | expression ]
-declaration   = "var" identifier "=" expression

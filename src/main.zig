@@ -6,11 +6,18 @@ const vm = @import("vm.zig");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
 
-    const filename = "example.prog";
+    if (std.os.argv.len < 2) {
+        std.debug.print("Pass file name as argument\n", .{});
+        return;
+    }
+
+    const filename = std.mem.span(std.os.argv[1]);
     const cwd = std.fs.cwd();
     const programFile = try cwd.openFile(filename, .{});
     const programText = try programFile.reader().readAllAlloc(allocator, 1 << 30);
+    defer allocator.free(programText);
     programFile.close();
 
     var statements = parser.parseFile(allocator, filename, programText) catch {
@@ -27,6 +34,8 @@ pub fn main() !void {
         return;
     };
     defer allocator.free(instructions);
+
+    std.debug.print("Number of instructions: {}\n\n", .{instructions.len});
 
     var stackBuffer: [1 << 10]u8 = undefined;
     var stackMemory = vm.Memory.init(stackBuffer[0..]);

@@ -151,9 +151,10 @@ pub const Expression = union(enum) {
 
     const binaryOperators = [_][]const TokenType{
         &.{.Equals},
+        &.{.DoubleEquals},
         &.{ .LessThan, .GreaterThan },
         &.{ .Plus, .Minus },
-        &.{ .Star, .Slash },
+        &.{ .Star, .Slash, .Percent },
     };
     fn hasPrecedence(token: Token, precedence: usize) bool {
         for (binaryOperators[precedence]) |operator| {
@@ -239,7 +240,9 @@ pub const Expression = union(enum) {
     }
 };
 
-pub const WhileLoop = struct {
+// A conditional block can be an if statement or a while loop
+pub const ConditionalBlock = struct {
+    isLoop: bool,
     condition: Expression,
     body: Block,
     allocator: Allocator,
@@ -247,7 +250,12 @@ pub const WhileLoop = struct {
     const Self = @This();
 
     fn parse(allocator: Allocator, lexer: *Lexer) !Self {
-        _ = try expectToken(lexer, .KeywordWhile);
+        var isLoop = lexer.curr == .KeywordWhile;
+        if (!isLoop) {
+            _ = try expectToken(lexer, .KeywordIf);
+        } else {
+            _ = lexer.next();
+        }
         var condition = try Expression.parse(allocator, lexer);
         errdefer condition.deinit();
         _ = try expectToken(lexer, .CurlyOpen);
@@ -256,6 +264,7 @@ pub const WhileLoop = struct {
         errdefer body.deinit();
         _ = try expectToken(lexer, .CurlyClose);
         return Self{
+            .isLoop = isLoop,
             .condition = condition,
             .body = body,
             .allocator = allocator,
@@ -272,16 +281,16 @@ pub const WhileLoop = struct {
 pub const Statement = union(enum) {
     Declaration: Declaration,
     Expression: Expression,
-    WhileLoop: WhileLoop,
+    ConditionalBlock: ConditionalBlock,
 
     fn parse(allocator: Allocator, lexer: *Lexer) Error!Statement {
         var statement: Statement = undefined;
         if (lexer.curr == Token.KeywordVar) {
             var declaration = try Declaration.parse(allocator, lexer);
             statement = Statement{ .Declaration = declaration };
-        } else if (lexer.curr == Token.KeywordWhile) {
-            var loop = try WhileLoop.parse(allocator, lexer);
-            statement = Statement{ .WhileLoop = loop };
+        } else if (lexer.curr == .KeywordWhile or lexer.curr == .KeywordIf) {
+            var condBlock = try ConditionalBlock.parse(allocator, lexer);
+            statement = Statement{ .ConditionalBlock = condBlock };
         } else {
             var expression = try Expression.parse(allocator, lexer);
             statement = Statement{ .Expression = expression };
@@ -299,8 +308,8 @@ pub const Statement = union(enum) {
             .Expression => |*expr| {
                 expr.deinit();
             },
-            .WhileLoop => |*loop| {
-                loop.deinit();
+            .ConditionalBlock => |*condBlock| {
+                condBlock.deinit();
             },
         }
     }
@@ -370,7 +379,7 @@ pub const Block = struct {
 pub fn parseFile(allocator: Allocator, filename: []const u8, text: []const u8) !Block {
     var lexer = Lexer.init(filename, text);
     _ = lexer.next();
-    var block = Block.parse(allocator, &lexer);
+    var block = try Block.parse(allocator, &lexer);
     _ = try expectToken(&lexer, .EoF);
     return block;
 }

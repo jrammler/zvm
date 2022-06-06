@@ -92,8 +92,10 @@ fn compileExpression(expression: Expression, instructions: *std.ArrayList(vm.Ins
                 .Minus => try instructions.append(.Sub),
                 .Star => try instructions.append(.Mul),
                 .Slash => try instructions.append(.Div),
+                .Percent => try instructions.append(.Mod),
                 .GreaterThan => try instructions.append(.GT),
                 .LessThan => try instructions.append(.LT),
+                .DoubleEquals => try instructions.append(.Eq),
                 .Equals => {
                     var addr = memoryFrame.variableAddr(op.operand1.Variable) orelse {
                         std.log.err("Variable \"{s}\" not found\n", .{op.operand1.Variable});
@@ -119,13 +121,15 @@ fn compileStatement(statement: Statement, instructions: *std.ArrayList(vm.Instru
             try compileExpression(expression, instructions, memoryFrame, syscallList);
             try instructions.append(.Pop);
         },
-        .WhileLoop => |loop| {
+        .ConditionalBlock => |condBlock| {
             var beginCondAddr = instructions.items.len;
-            try compileExpression(loop.condition, instructions, memoryFrame, syscallList);
+            try compileExpression(condBlock.condition, instructions, memoryFrame, syscallList);
             var jumpCondAddr = instructions.items.len;
             try instructions.append(.{ .JumpEqZero = 0 });
-            try compileBlock(loop.body, instructions, memoryFrame, syscallList);
-            try instructions.append(.{ .Jump = beginCondAddr });
+            try compileBlock(condBlock.body, instructions, memoryFrame, syscallList);
+            if (condBlock.isLoop) {
+                try instructions.append(.{ .Jump = beginCondAddr });
+            }
             instructions.items[jumpCondAddr].JumpEqZero = instructions.items.len;
         },
     }

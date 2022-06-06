@@ -6,8 +6,10 @@ pub const Instruction = union(enum) {
     Sub,
     Mul,
     Div,
+    Mod,
     LT,
     GT,
+    Eq,
     Store,
     Load,
     Pop,
@@ -97,7 +99,13 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
             .Div => {
                 var v1 = stack.popInt();
                 var v2 = stack.popInt();
-                stack.pushInt(@divTrunc(v1, v2));
+                stack.pushInt(@divFloor(v1, v2));
+                ip += 1;
+            },
+            .Mod => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(@mod(v1, v2));
                 ip += 1;
             },
             .LT => {
@@ -110,6 +118,12 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
                 var v1 = stack.popInt();
                 var v2 = stack.popInt();
                 stack.pushInt(if (v1 > v2) 1 else 0);
+                ip += 1;
+            },
+            .Eq => {
+                var v1 = stack.popInt();
+                var v2 = stack.popInt();
+                stack.pushInt(if (v1 == v2) 1 else 0);
                 ip += 1;
             },
             .Store => {

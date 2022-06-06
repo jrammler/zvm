@@ -25,7 +25,9 @@ pub const Token = union(enum) {
     Number: i32,
     KeywordVar,
     KeywordWhile,
+    KeywordIf,
     Equals,
+    DoubleEquals,
     LessThan,
     GreaterThan,
     ParenOpen,
@@ -37,6 +39,7 @@ pub const Token = union(enum) {
     Minus,
     Star,
     Slash,
+    Percent,
     NewLine,
     Init,
     EoF,
@@ -58,6 +61,7 @@ pub const Lexer = struct {
         Start,
         Identifier,
         Number,
+        Equals,
         NewLine,
     };
 
@@ -94,11 +98,9 @@ pub const Lexer = struct {
                         startPos = curPos;
                         self.setLocation();
                     } else if (c == '=') {
-                        self.pos = curPos + 1;
-                        self.curr = .Equals;
+                        state = .Equals;
+                        startPos = curPos;
                         self.setLocation();
-                        self.col += 1;
-                        return self.curr;
                     } else if (c == '<') {
                         self.pos = curPos + 1;
                         self.curr = .LessThan;
@@ -165,6 +167,12 @@ pub const Lexer = struct {
                         self.setLocation();
                         self.col += 1;
                         return self.curr;
+                    } else if (c == '%') {
+                        self.pos = curPos + 1;
+                        self.curr = .Percent;
+                        self.setLocation();
+                        self.col += 1;
+                        return self.curr;
                     } else if (c == ascii.control_code.EOT) {
                         self.pos = curPos;
                         self.curr = .EoF;
@@ -192,6 +200,9 @@ pub const Lexer = struct {
                         } else if (std.mem.eql(u8, "while", text)) {
                             self.curr = .KeywordWhile;
                             return self.curr;
+                        } else if (std.mem.eql(u8, "if", text)) {
+                            self.curr = .KeywordIf;
+                            return self.curr;
                         }
                         self.curr = .{ .Identifier = text };
                         return self.curr;
@@ -204,6 +215,17 @@ pub const Lexer = struct {
                         self.curr = .{ .Number = std.fmt.parseInt(i32, text, 0) catch unreachable };
                         return self.curr;
                     }
+                },
+                .Equals => {
+                    if (c != '=') {
+                        self.pos = curPos;
+                        self.curr = .Equals;
+                        return self.curr;
+                    }
+                    self.pos = curPos + 1;
+                    self.col += 1;
+                    self.curr = .DoubleEquals;
+                    return self.curr;
                 },
                 .NewLine => {
                     if (c != ascii.control_code.CR and c != ascii.control_code.LF and !ascii.isBlank(c)) {

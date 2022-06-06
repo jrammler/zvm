@@ -1,7 +1,0 @@
-var sum = 0
-var i = 10
-while (i > 0) {
-	sum = sum + i
-	i = i - 1
-}
-print(sum)

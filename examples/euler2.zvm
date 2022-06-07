@@ -1,0 +1,13 @@
+var last = 1
+var curr = 1
+var sum = 0
+while (curr < 4000000) {
+	if (curr % 2 == 0) {
+		sum = sum + curr
+	}
+
+	var tmp = curr
+	curr = last + curr
+	last = tmp
+}
+print(sum)

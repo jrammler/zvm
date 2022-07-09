@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const Instruction = union(enum) {
     Push: i32,
+    Pop,
     Add,
     Sub,
     Mul,
@@ -12,70 +13,115 @@ pub const Instruction = union(enum) {
     Eq,
     Store,
     Load,
-    Pop,
+    StoreLocal,
+    LoadLocal,
+    PushSP,
+    Res: usize,
+    Free: usize,
     Jump: usize,
     JumpGtZero: usize,
     JumpEqZero: usize,
     Syscall: usize,
+    Call: usize,
+    FnInit,
+    Ret,
 };
 
-pub const Memory = struct {
+pub const Stack = struct {
     buffer: []u8,
+    sp: usize,
+    bp: usize,
 
-    pub fn init(buffer: []u8) Memory {
-        return Memory{ .buffer = buffer };
+    const Self = @This();
+
+    pub fn init(buffer: []u8) Stack {
+        return Stack{
+            .buffer = buffer,
+            .sp = buffer.len,
+            .bp = 0,
+        };
     }
 
-    pub fn storeInt(self: *Memory, address: usize, value: i32) void {
+    pub fn storeInt(self: *Self, address: usize, value: i32) void {
         var v = value;
         std.mem.copy(u8, self.buffer[address .. address + 4], @ptrCast(*[4]u8, &v));
     }
 
-    pub fn loadInt(self: *Memory, address: usize) i32 {
+    pub fn storeIntLocal(self: *Self, offset: i32, value: i32) void {
+        self.storeInt(@intCast(usize, @intCast(i32, self.bp) + offset), value);
+    }
+
+    pub fn loadInt(self: *const Self, address: usize) i32 {
         var value: i32 = undefined;
         std.mem.copy(u8, @ptrCast(*[4]u8, &value), self.buffer[address .. address + 4]);
         return value;
     }
-};
 
-pub const Stack = struct {
-    memory: Memory,
-    sp: usize,
-
-    pub fn init(memory: Memory) Stack {
-        return Stack{
-            .memory = memory,
-            .sp = 0,
-        };
+    pub fn loadIntLocal(self: *const Self, offset: i32) i32 {
+        return self.loadInt(@intCast(usize, @intCast(i32, self.bp) + offset));
     }
 
-    pub fn pushInt(self: *Stack, value: i32) void {
-        self.memory.storeInt(self.sp, value);
-        self.sp += 4;
-    }
-
-    pub fn popInt(self: *Stack) i32 {
+    pub fn pushInt(self: *Self, value: i32) void {
         self.sp -= 4;
-        return self.memory.loadInt(self.sp);
+        self.storeInt(self.sp, value);
+    }
+
+    pub fn popInt(self: *Self) i32 {
+        var value = self.loadInt(self.sp);
+        self.sp += 4;
+        return value;
+    }
+
+    fn pushBase(self: *Self) void {
+        self.pushInt(@intCast(i32, self.bp));
+        self.bp = self.sp;
+    }
+
+    fn popBase(self: *Self) void {
+        self.sp = self.bp;
+        self.bp = @intCast(usize, self.popInt());
+    }
+
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try std.fmt.format(writer, "[ ", .{});
+        var i: usize = self.buffer.len;
+        while (i > self.sp) {
+            i -= 4;
+            try std.fmt.format(writer, "{}, ", .{self.loadInt(i)});
+        }
+        try std.fmt.format(writer, "]\n", .{});
     }
 };
 
-pub const Syscall = fn (stack: *Stack, memory: *Memory) void;
+pub const Syscall = fn (stack: *Stack) void;
 
-pub fn syscallPrint(stack: *Stack, memory: *Memory) void {
-    _ = memory;
-    var value = stack.popInt();
+pub fn syscallPrint(stack: *Stack) void {
+    var value = stack.loadIntLocal(4);
     std.debug.print("{}\n", .{value});
-    stack.pushInt(0);
+    stack.storeInt(@intCast(usize, stack.loadIntLocal(8)), 0);
 }
 
-pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, syscalls: []const Syscall) void {
+pub fn evaluate(program: []const Instruction, stack: *Stack, syscalls: []const Syscall) void {
     var ip: usize = 0;
+    var cnt: usize = 0;
 
     while (ip < program.len) {
+        cnt += 1;
         switch (program[ip]) {
             .Push => |value| {
                 stack.pushInt(value);
+                ip += 1;
+            },
+            .Pop => {
+                _ = stack.popInt();
                 ip += 1;
             },
             .Add => {
@@ -129,17 +175,37 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
             .Store => {
                 var addr = stack.popInt();
                 var value = stack.popInt();
-                memory.storeInt(@intCast(usize, addr), value);
+                stack.storeInt(@intCast(usize, addr), value);
                 ip += 1;
             },
             .Load => {
                 var addr = stack.popInt();
-                var value = memory.loadInt(@intCast(usize, addr));
+                var value = stack.loadInt(@intCast(usize, addr));
                 stack.pushInt(value);
                 ip += 1;
             },
-            .Pop => {
-                _ = stack.popInt();
+            .StoreLocal => {
+                var offset = stack.popInt();
+                var value = stack.popInt();
+                stack.storeIntLocal(offset, value);
+                ip += 1;
+            },
+            .LoadLocal => {
+                var offset = stack.popInt();
+                var value = stack.loadIntLocal(offset);
+                stack.pushInt(value);
+                ip += 1;
+            },
+            .PushSP => {
+                stack.pushInt(@intCast(i32, stack.sp));
+                ip += 1;
+            },
+            .Res => |amount| {
+                stack.sp -= amount;
+                ip += 1;
+            },
+            .Free => |amount| {
+                stack.sp += amount;
                 ip += 1;
             },
             .Jump => |jmpIp| {
@@ -162,8 +228,23 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, memory: *Memory, sy
                 }
             },
             .Syscall => |syscall| {
-                syscalls[syscall](stack, memory);
+                stack.pushBase();
+                syscalls[syscall](stack);
+                stack.popBase();
                 ip += 1;
+            },
+            .Call => |call| {
+                stack.pushInt(@intCast(i32, ip) + 1);
+                stack.pushBase();
+                ip = call;
+            },
+            .FnInit => {
+                // TODO: remove FnInit
+                ip += 1;
+            },
+            .Ret => {
+                stack.popBase();
+                ip = @intCast(usize, stack.popInt());
             },
         }
     }
@@ -203,16 +284,14 @@ test "program evaluation" {
         .{ .Jump = 6 },
     };
 
-    var stackBuffer: [1 << 10]u8 = undefined;
-    var stackMemory = Memory.init(stackBuffer[0..]);
-    var stack = Stack.init(stackMemory);
-    var memoryBuffer: [1 << 10]u8 = undefined;
-    var memory = Memory.init(memoryBuffer[0..]);
+    const memsize: usize = 1 << 10;
+    var stackBuffer: [memsize]u8 = undefined;
+    var stack = Stack.init(stackBuffer[0..]);
 
     const syscalls = [_]Syscall{};
 
-    evaluate(program[0..], &stack, &memory, syscalls[0..]);
-    try expectEqual(@as(usize, 0), stack.sp);
-    try expectEqual(@as(i32, 0), memory.loadInt(0));
-    try expectEqual(@as(i32, 55), memory.loadInt(4));
+    evaluate(program[0..], &stack, syscalls[0..]);
+    try expectEqual(memsize, stack.sp);
+    try expectEqual(@as(i32, 0), stack.loadInt(0));
+    try expectEqual(@as(i32, 55), stack.loadInt(4));
 }

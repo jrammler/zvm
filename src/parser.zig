@@ -64,12 +64,16 @@ const ArgumentList = struct {
     fn parse(allocator: Allocator, lexer: *Lexer) !ArgumentList {
         var arguments = std.ArrayList(Expression).init(allocator);
         defer arguments.deinit();
-        while (lexer.curr != Token.ParenClose) {
+        while (lexer.curr != .ParenClose) {
             var expr = try Expression.parse(allocator, lexer);
             errdefer expr.deinit();
 
             try arguments.append(expr);
-            if (lexer.curr != TokenType.Comma) break;
+            if (lexer.curr != .Comma) {
+                break;
+            } else {
+                _ = lexer.next();
+            }
         }
 
         return ArgumentList{
@@ -278,10 +282,63 @@ pub const ConditionalBlock = struct {
     }
 };
 
+pub const FunctionDefinition = struct {
+    name: []const u8,
+    arguments: ArgumentList,
+    body: Block,
+
+    const Self = @This();
+
+    fn parse(allocator: Allocator, lexer: *Lexer) !Self {
+        _ = try expectToken(lexer, .KeywordFn);
+        var nameToken = try expectToken(lexer, .Identifier);
+        _ = try expectToken(lexer, .ParenOpen);
+        var arguments = try ArgumentList.parse(allocator, lexer);
+        errdefer arguments.deinit();
+        _ = try expectToken(lexer, .ParenClose);
+        _ = try expectToken(lexer, .CurlyOpen);
+        _ = try expectToken(lexer, .NewLine);
+        var body = try Block.parse(allocator, lexer);
+        errdefer body.deinit();
+        _ = try expectToken(lexer, .CurlyClose);
+
+        return Self{
+            .name = nameToken.Identifier,
+            .arguments = arguments,
+            .body = body,
+        };
+    }
+
+    fn deinit(self: *Self) void {
+        self.arguments.deinit();
+        self.body.deinit();
+    }
+};
+
+pub const ReturnStatement = struct {
+    value: Expression,
+
+    const Self = @This();
+
+    fn parse(allocator: Allocator, lexer: *Lexer) !Self {
+        _ = try expectToken(lexer, .KeywordReturn);
+        var value = try Expression.parse(allocator, lexer);
+        errdefer value.deinit();
+
+        return Self{ .value = value };
+    }
+
+    fn deinit(self: *Self) void {
+        self.value.deinit();
+    }
+};
+
 pub const Statement = union(enum) {
     Declaration: Declaration,
     Expression: Expression,
     ConditionalBlock: ConditionalBlock,
+    FunctionDefinition: FunctionDefinition,
+    ReturnStatement: ReturnStatement,
 
     fn parse(allocator: Allocator, lexer: *Lexer) Error!Statement {
         var statement: Statement = undefined;
@@ -291,6 +348,12 @@ pub const Statement = union(enum) {
         } else if (lexer.curr == .KeywordWhile or lexer.curr == .KeywordIf) {
             var condBlock = try ConditionalBlock.parse(allocator, lexer);
             statement = Statement{ .ConditionalBlock = condBlock };
+        } else if (lexer.curr == .KeywordFn) {
+            var fun = try FunctionDefinition.parse(allocator, lexer);
+            statement = Statement{ .FunctionDefinition = fun };
+        } else if (lexer.curr == .KeywordReturn) {
+            var ret = try ReturnStatement.parse(allocator, lexer);
+            statement = Statement{ .ReturnStatement = ret };
         } else {
             var expression = try Expression.parse(allocator, lexer);
             statement = Statement{ .Expression = expression };
@@ -310,6 +373,12 @@ pub const Statement = union(enum) {
             },
             .ConditionalBlock => |*condBlock| {
                 condBlock.deinit();
+            },
+            .FunctionDefinition => |*fun| {
+                fun.deinit();
+            },
+            .ReturnStatement => |*ret| {
+                ret.deinit();
             },
         }
     }

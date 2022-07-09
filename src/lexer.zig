@@ -26,6 +26,8 @@ pub const Token = union(enum) {
     KeywordVar,
     KeywordWhile,
     KeywordIf,
+    KeywordFn,
+    KeywordReturn,
     Equals,
     DoubleEquals,
     LessThan,
@@ -202,6 +204,12 @@ pub const Lexer = struct {
                             return self.curr;
                         } else if (std.mem.eql(u8, "if", text)) {
                             self.curr = .KeywordIf;
+                            return self.curr;
+                        } else if (std.mem.eql(u8, "fn", text)) {
+                            self.curr = .KeywordFn;
+                            return self.curr;
+                        } else if (std.mem.eql(u8, "return", text)) {
+                            self.curr = .KeywordReturn;
                             return self.curr;
                         }
                         self.curr = .{ .Identifier = text };

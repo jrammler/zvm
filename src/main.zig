@@ -26,22 +26,20 @@ pub fn main() !void {
     };
     defer statements.deinit();
 
-    const syscallList = [_][]const u8{"print"};
+    var syscallList = std.StringHashMap(compiler.FunctionDescription).init(allocator);
+    defer syscallList.deinit();
+    try syscallList.put("print", .{ .signature = .{ .argcount = 1 }, .location = .{ .syscallId = 0 } });
     const syscalls = [_]vm.Syscall{vm.syscallPrint};
+    const memsize: usize = 1 << 10;
 
-    var instructions = compiler.compile(allocator, statements, syscallList[0..]) catch {
+    var instructions = compiler.compile(allocator, statements, &syscallList, memsize) catch {
         std.log.err("Error during compilation\n", .{});
         return;
     };
     defer allocator.free(instructions);
 
-    std.debug.print("Number of instructions: {}\n\n", .{instructions.len});
+    var stackBuffer: [memsize]u8 = undefined;
+    var stack = vm.Stack.init(stackBuffer[0..]);
 
-    var stackBuffer: [1 << 10]u8 = undefined;
-    var stackMemory = vm.Memory.init(stackBuffer[0..]);
-    var stack = vm.Stack.init(stackMemory);
-    var memoryBuffer: [1 << 10]u8 = undefined;
-    var memory = vm.Memory.init(memoryBuffer[0..]);
-
-    vm.evaluate(instructions, &stack, &memory, syscalls[0..]);
+    vm.evaluate(instructions, &stack, syscalls[0..]);
 }

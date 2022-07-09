@@ -1,0 +1,6 @@
+fn sum(a, b) {
+	var test = 1
+	return a + b
+}
+
+print(sum(1, 2))

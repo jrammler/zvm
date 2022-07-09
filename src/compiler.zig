@@ -332,6 +332,7 @@ fn compileStatement(statement: Statement, instructions: *std.ArrayList(vm.Instru
             try instructions.append(.{ .Push = @intCast(i32, 2 + args) * 4 });
             try instructions.append(.LoadLocal);
             try instructions.append(.Store);
+            try instructions.append(.Ret);
         },
     }
 }

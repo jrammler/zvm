@@ -1,4 +1,5 @@
 const std = @import("std");
+const root = @import("root");
 
 pub const Instruction = union(enum) {
     Push: i32,
@@ -97,7 +98,7 @@ pub const Stack = struct {
             i -= 4;
             try std.fmt.format(writer, "{}, ", .{self.loadInt(i)});
         }
-        try std.fmt.format(writer, "]\n", .{});
+        try std.fmt.format(writer, "]", .{});
     }
 };
 
@@ -110,10 +111,20 @@ pub fn syscallPrint(stack: *Stack) void {
 }
 
 pub fn evaluate(program: []const Instruction, stack: *Stack, syscalls: []const Syscall) void {
+    var debug: bool = if (@hasDecl(root, "debug")) root.debug else false;
+
     var ip: usize = 0;
     var cnt: usize = 0;
 
+    if (debug) {
+        for (program) |instruction, i| {
+            std.debug.print("{}: {s}\n", .{ i, instruction });
+        }
+        std.debug.print("\n", .{});
+    }
+
     while (ip < program.len) {
+        var oldIp = ip;
         cnt += 1;
         switch (program[ip]) {
             .Push => |value| {
@@ -246,6 +257,9 @@ pub fn evaluate(program: []const Instruction, stack: *Stack, syscalls: []const S
                 stack.popBase();
                 ip = @intCast(usize, stack.popInt());
             },
+        }
+        if (debug) {
+            std.debug.print("ip: {} stack: {s}\n", .{ oldIp, stack });
         }
     }
 }

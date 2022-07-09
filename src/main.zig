@@ -3,6 +3,8 @@ const parser = @import("parser.zig");
 const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
 
+pub const debug = false;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

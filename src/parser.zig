@@ -64,6 +64,10 @@ const ArgumentList = struct {
     fn parse(allocator: Allocator, lexer: *Lexer) !ArgumentList {
         var arguments = std.ArrayList(Expression).init(allocator);
         defer arguments.deinit();
+        errdefer for (arguments.items) |*argument| {
+            argument.deinit();
+        };
+
         while (lexer.curr != .ParenClose) {
             var expr = try Expression.parse(allocator, lexer);
             errdefer expr.deinit();
@@ -160,6 +164,7 @@ pub const Expression = union(enum) {
         &.{ .Plus, .Minus },
         &.{ .Star, .Slash, .Percent },
     };
+
     fn hasPrecedence(token: Token, precedence: usize) bool {
         for (binaryOperators[precedence]) |operator| {
             if (operator == @as(TokenType, token)) {
@@ -277,6 +282,7 @@ pub const ConditionalBlock = struct {
 
     pub fn deinit(self: *Self) void {
         self.condition.deinit();
+        self.condition = undefined;
         self.body.deinit();
         self.body = undefined;
     }
@@ -398,6 +404,9 @@ pub const Statement = union(enum) {
             .Expression => |expr| {
                 return std.fmt.format(writer, "{}", .{expr});
             },
+            .ConditionalBlock => std.debug.todo(""),
+            .FunctionDefinition => std.debug.todo(""),
+            .ReturnStatement => std.debug.todo(""),
         }
     }
 };
@@ -411,9 +420,13 @@ pub const Block = struct {
     fn parse(allocator: Allocator, lexer: *Lexer) !Self {
         var statements = std.ArrayList(Statement).init(allocator);
         defer statements.deinit();
+        errdefer for (statements.items) |*statement| {
+            statement.deinit();
+        };
 
         while (lexer.curr != Token.EoF and lexer.curr != Token.CurlyClose) {
             var statement = try Statement.parse(allocator, lexer);
+            errdefer statement.deinit();
             try statements.append(statement);
         }
 
@@ -449,6 +462,7 @@ pub fn parseFile(allocator: Allocator, filename: []const u8, text: []const u8) !
     var lexer = Lexer.init(filename, text);
     _ = lexer.next();
     var block = try Block.parse(allocator, &lexer);
+    errdefer block.deinit();
     _ = try expectToken(&lexer, .EoF);
     return block;
 }
